@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { sendMail } from "../mail/index.js";
-import { FiveDigit } from "../utils/index.js";
+import { FiveDigit, FourDigit } from "../utils/index.js";
 import multer from "../multer/index.js";
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import user from "../helper/user.js";
 import fs from "fs";
+import FormData from "form-data";
+import { airtelSMSConfig } from "../config/airtelSMS.js";
 
 const router = Router();
 
@@ -58,6 +60,35 @@ const CheckLogged = (req, res, next) => {
   });
 };
 
+// Helper function to send OTP via Airtel SMS
+const sendOTPviaSMS = async (phoneNumber, message, otp) => {
+  try {
+    let url = airtelSMSConfig.baseURL + '/api/v1/send-sms';
+    let basicAuth = Buffer.from(`${airtelSMSConfig.authUsername}:${airtelSMSConfig.authPassword}`).toString('base64');
+    
+    let requestBody = new FormData();
+    requestBody.append('customerId', airtelSMSConfig.customerId);
+    requestBody.append('destinationAddress', phoneNumber);
+    requestBody.append('sourceAddress', airtelSMSConfig.sourceAddress);
+    requestBody.append('messageType', airtelSMSConfig.messageType);
+    requestBody.append('entityId', airtelSMSConfig.entityId);
+    requestBody.append('message', message);
+    requestBody.append('dltTemplateId', airtelSMSConfig.dltTemplateId);
+    requestBody.append('otp', otp);
+
+    let response = await axios.post(url, requestBody, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Basic ${basicAuth}`,
+      }
+    });
+    return response.data;
+  } catch (err) {
+    console.error(`AIRTEL SMS ERROR: ${err.response ? JSON.stringify(err.response.data) : err.message}`);
+    throw new Error("Failed to send SMS");
+  }
+};
+
 router.get("/checkLogged", CheckLogged, (req, res) => {
   res.status(405).json({
     status: 405,
@@ -66,32 +97,36 @@ router.get("/checkLogged", CheckLogged, (req, res) => {
 });
 
 router.post("/register", CheckLogged, async (req, res) => {
-  let { name, email, number, google } = req.body;
+  let { name, email, number } = req.body;
+  
   if (number?.length === 10 && name) {
-    if (google) {
-      let response;
-      try {
-        let googleCheck = await axios.get(
-          "https://www.googleapis.com/oauth2/v3/userinfo",
-          {
-            headers: {
-              Authorization: `Bearer ${google}`,
-            },
-          }
-        );
+    var validRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
 
-        if (
-          googleCheck?.data?.email?.toLowerCase?.() === email?.toLowerCase?.()
-        ) {
-          response = await user.register_direct({
-            name,
-            email: email?.toLowerCase?.(),
-            number,
-          });
-        } else {
-          res.status(500).json({
-            status: 500,
-            message: "Something Wrong",
+    if (email?.match(validRegex)) {
+      email = email?.toLowerCase?.();
+      
+      // Generate 4-digit OTP
+      let otp = FourDigit();
+      
+      try {
+        // Register request in database
+        let response = await user.register_request({
+          email: `${email}_register`,
+          number,
+          secret: otp,
+        });
+
+        if (response) {
+          // Send OTP via Airtel SMS
+          const message = `Your MML Live registration verification code is: ${otp}`;
+          await sendOTPviaSMS(number, message, otp);
+          
+          res.status(200).json({
+            status: 200,
+            message: "Register OTP sent to your phone",
+            data: {
+              otp: true,
+            },
           });
         }
       } catch (err) {
@@ -100,70 +135,15 @@ router.post("/register", CheckLogged, async (req, res) => {
         } else {
           res.status(500).json({
             status: 500,
-            message: err,
-          });
-        }
-      } finally {
-        if (response) {
-          res.status(200).json({
-            status: 200,
-            message: "Successfully Registered",
-            data: {
-              google: true,
-            },
+            message: err.message || "Failed to send OTP",
           });
         }
       }
     } else {
-      var validRegex =
-        /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
-
-      if (email?.match(validRegex)) {
-        email = email?.toLowerCase?.();
-
-        let secret = FiveDigit?.();
-
-        let response;
-
-        try {
-          response = await user.register_request({
-            email: `${email}_register`,
-            number,
-            secret,
-          });
-
-          if (response) {
-            await sendMail(
-              {
-                to: email,
-                subject: `MML Live Register Verification Code`,
-                text: secret,
-              })
-
-            res.status(200).json({
-              status: 200,
-              message: "Register Otp Sented",
-              data: {
-                otp: true,
-              },
-            });
-          }
-        } catch (err) {
-          if (err?.status) {
-            res.status(err.status).json(err);
-          } else {
-            res.status(500).json({
-              status: 500,
-              message: err,
-            });
-          }
-        }
-      } else {
-        res.status(422).json({
-          status: 422,
-          message: "Enter email",
-        });
-      }
+      res.status(422).json({
+        status: 422,
+        message: "Enter valid email",
+      });
     }
   } else {
     res.status(422).json({
@@ -281,30 +261,28 @@ router.get("/login-google", CheckLogged, async (req, res) => {
 });
 
 router.post("/login-otp", CheckLogged, async (req, res) => {
-  let { email } = req?.body;
+  let { email, number } = req?.body;
 
   email = email?.toLowerCase?.();
 
-  if (email) {
-    let secret = FiveDigit?.();
+  if (email && number?.length === 10) {
+    // Generate 4-digit OTP
+    let otp = FourDigit();
 
-    let response;
     try {
-      response = await user.login_request({
+      let response = await user.login_request({
         email: `${email}_login`,
-        secret,
+        secret: otp,
       });
 
       if (response) {
-        await sendMail({
-          to: email,
-          subject: `MML Live Login Verification Code`,
-          text: secret,
-        })
+        // Send OTP via Airtel SMS
+        const message = `Your MML Live login verification code is: ${otp}`;
+        await sendOTPviaSMS(number, message, otp);
 
         res.status(200).json({
           status: 200,
-          message: "Login Otp Sented",
+          message: "Login OTP sent to your phone",
         });
       }
     } catch (err) {
@@ -313,14 +291,14 @@ router.post("/login-otp", CheckLogged, async (req, res) => {
       } else {
         res.status(500).json({
           status: 500,
-          message: err,
+          message: err.message || "Failed to send OTP",
         });
       }
     }
   } else {
     res.status(422).json({
       status: 422,
-      message: "Enter Email",
+      message: "Enter Email and Phone Number",
     });
   }
 });
@@ -384,23 +362,23 @@ router.post(
   },
   CheckLogged,
   async (req, res) => {
-    let secret = FiveDigit?.();
+    // Generate 4-digit OTP
+    let otp = FourDigit();
+    let userData;
 
-    let response;
     try {
-      response = await user.edit_request(secret, req?.query?.userId, req?.body);
+      userData = await user.get_user(req?.query?.userId);
+      
+      let response = await user.edit_request(otp, req?.query?.userId, req?.body);
 
       if (response) {
-        await sendMail(
-          {
-            to: req?.query?.email,
-            subject: `MML Live Profile Edit Verification Code`,
-            text: secret,
-          })
+        // Send OTP via Airtel SMS
+        const message = `Your MML Live profile edit verification code is: ${otp}`;
+        await sendOTPviaSMS(userData.number, message, otp);
 
         res.status(200).json({
           status: 200,
-          message: "Profile Edit Otp Sented",
+          message: "Profile Edit OTP sent to your phone",
           data: {
             otp: true,
           },
@@ -412,7 +390,7 @@ router.post(
       } else {
         res.status(500).json({
           status: 500,
-          message: err,
+          message: err.message || "Failed to send OTP",
         });
       }
     }
