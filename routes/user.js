@@ -1,12 +1,10 @@
 import { Router } from "express";
-import { sendMail } from "../mail/index.js";
-import { FiveDigit, FourDigit } from "../utils/index.js";
+import {  FourDigit } from "../utils/index.js";
 import multer from "../multer/index.js";
 import axios from "axios";
 import jwt from "jsonwebtoken";
 import user from "../helper/user.js";
 import fs from "fs";
-import FormData from "form-data";
 import { airtelSMSConfig } from "../config/airtelSMS.js";
 
 const router = Router();
@@ -22,7 +20,7 @@ const CheckLogged = (req, res, next) => {
         if (userData) {
           if (req?.query?.next) {
             req.query.userId = userData?._id?.toString?.();
-            req.query.email = userData?.email?.toLowerCase?.();
+            req.query.phoneNumber = userData?.phoneNumber?.toLowerCase?.();
             next();
           } else {
             res.status(208).json({
@@ -74,7 +72,7 @@ const sendOTPviaSMS = async (phoneNumber, message, otp) => {
     requestBody.append('entityId', airtelSMSConfig.entityId);
     requestBody.append('message', message);
     requestBody.append('dltTemplateId', airtelSMSConfig.dltTemplateId);
-    requestBody.append('otp', otp);
+    requestBody.append('otp', true);
 
     let response = await axios.post(url, requestBody, {
       headers: {
@@ -97,13 +95,13 @@ router.get("/checkLogged", CheckLogged, (req, res) => {
 });
 
 router.post("/register", CheckLogged, async (req, res) => {
-  let { name, email, number } = req.body;
+  let { name, phoneNumber, number } = req.body;
   
   if (number?.length === 10 && name) {
-    var validRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
+    var validRegex = /^\d{10}$/; // Simple regex for 10-digit number
 
-    if (email?.match(validRegex)) {
-      email = email?.toLowerCase?.();
+    if (phoneNumber?.match(validRegex)) {
+      phoneNumber = phoneNumber?.toLowerCase?.();
       
       // Generate 4-digit OTP
       let otp = FourDigit();
@@ -111,14 +109,14 @@ router.post("/register", CheckLogged, async (req, res) => {
       try {
         // Register request in database
         let response = await user.register_request({
-          email: `${email}_register`,
+          phoneNumber: `${phoneNumber}_register`,
           number,
           secret: otp,
         });
 
         if (response) {
           // Send OTP via Airtel SMS
-          const message = `Your MML Live registration verification code is: ${otp}`;
+          const message = `${otp} is the OTP to login into your MIDLAND account and valid for 5 mins. We don't ask for your OTP/Bank info. Don't share it with anyone. -Midland microfin",;`;
           await sendOTPviaSMS(number, message, otp);
           
           res.status(200).json({
@@ -142,7 +140,7 @@ router.post("/register", CheckLogged, async (req, res) => {
     } else {
       res.status(422).json({
         status: 422,
-        message: "Enter valid email",
+        message: "Enter valid phone number",
       });
     }
   } else {
@@ -154,16 +152,16 @@ router.post("/register", CheckLogged, async (req, res) => {
 });
 
 router.post("/register-verify", CheckLogged, async (req, res) => {
-  let { email, name, number, OTP } = req.body;
+  let { phoneNumber, name, number, OTP } = req.body;
 
-  email = email?.toLowerCase?.();
+  phoneNumber = phoneNumber?.toLowerCase?.();
 
   if (number?.length === 10) {
-    if (email && OTP) {
+    if (phoneNumber && OTP) {
       let response;
       try {
         response = await user.register_verify({
-          email: `${email}_register`,
+          phoneNumber: `${phoneNumber}_register`,
           number,
           name,
           secret: OTP,
@@ -214,9 +212,9 @@ router.get("/login-google", CheckLogged, async (req, res) => {
       }
     );
 
-    if (googleCheck?.data?.email) {
-      response = await user.getUserByEmail(
-        googleCheck.data.email?.toLowerCase?.()
+    if (googleCheck?.data?.phoneNumber) {
+      response = await user.getUserByPhoneNumber(
+        googleCheck.data.phoneNumber?.toLowerCase?.()
       );
     } else {
       res.status(500).json({
@@ -261,17 +259,17 @@ router.get("/login-google", CheckLogged, async (req, res) => {
 });
 
 router.post("/login-otp", CheckLogged, async (req, res) => {
-  let { email, number } = req?.body;
+  let { phoneNumber, number } = req?.body;
 
-  email = email?.toLowerCase?.();
+  phoneNumber = phoneNumber?.toLowerCase?.();
 
-  if (email && number?.length === 10) {
+  if (phoneNumber && number?.length === 10) {
     // Generate 4-digit OTP
     let otp = FourDigit();
 
     try {
       let response = await user.login_request({
-        email: `${email}_login`,
+        phoneNumber: `${phoneNumber}_login`,
         secret: otp,
       });
 
@@ -298,20 +296,20 @@ router.post("/login-otp", CheckLogged, async (req, res) => {
   } else {
     res.status(422).json({
       status: 422,
-      message: "Enter Email and Phone Number",
+      message: "Enter Phone Number and Phone Number",
     });
   }
 });
 
 router.post("/login-verify", CheckLogged, async (req, res) => {
-  let { email, OTP } = req?.body;
+  let { phoneNumber, OTP } = req?.body;
 
-  email = email?.toLowerCase?.();
+  phoneNumber = phoneNumber?.toLowerCase?.();
 
-  if (email && OTP) {
+  if (phoneNumber && OTP) {
     let response;
     try {
-      response = await user.login_verify(`${email}_login`, OTP);
+      response = await user.login_verify(`${phoneNumber}_login`, OTP);
     } catch (err) {
       if (err?.status) {
         res.status(err.status).json(err);

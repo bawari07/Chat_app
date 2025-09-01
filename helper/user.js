@@ -9,21 +9,21 @@ export default {
       try {
         await db
           .collection(collections.TEMP)
-          .createIndex({ email: 1 }, { unique: true });
+          .createIndex({ phoneNumber: 1 }, { unique: true });
 
         await db
           .collection(collections.TEMP)
           .createIndex({ expireAt: 1 }, { expireAfterSeconds: 3600 });
 
-        let email_check = await db.collection(collections.USERS).findOne({
-          email: details?.email?.replace?.("_register", ""),
+        let phoneNumber_check = await db.collection(collections.USERS).findOne({
+          phoneNumber: details?.phoneNumber?.replace?.("_register", ""),
         });
 
         let number_check = await db.collection(collections.USERS).findOne({
           number: details?.number,
         });
 
-        if (!email_check && !number_check) {
+        if (!phoneNumber_check && !number_check) {
           delete details.number;
 
           response = await db.collection(collections.TEMP).insertOne({
@@ -194,11 +194,11 @@ export default {
       }
     });
   },
-  getUserByEmail: (email) => {
+  getUserByPhoneNumber: (phoneNumber) => {
     return new Promise(async (resolve, reject) => {
       try {
         let user = await db.collection(collections.USERS).findOne({
-          email,
+          phoneNumber,
         });
 
         if (user) {
@@ -206,7 +206,7 @@ export default {
         } else {
           reject({
             status: 404,
-            message: "Wrong Email",
+            message: "Wrong Phone Number",
           });
         }
       } catch (err) {
@@ -220,14 +220,14 @@ export default {
       try {
         await db
           .collection(collections.TEMP)
-          .createIndex({ email: 1 }, { unique: true });
+          .createIndex({ phoneNumber: 1 }, { unique: true });
 
         await db
           .collection(collections.TEMP)
           .createIndex({ expireAt: 1 }, { expireAfterSeconds: 3600 });
 
         let check = await db.collection(collections.USERS).findOne({
-          email: details?.email?.replace?.("_login", ""),
+          phoneNumber: details?.phoneNumber?.replace?.("_login", ""),
         });
 
         if (check) {
@@ -275,17 +275,17 @@ export default {
       }
     });
   },
-  login_verify: (email, secret) => {
+  login_verify: (phoneNumber, secret) => {
     return new Promise(async (resolve, reject) => {
       let response;
       try {
         let already = await db.collection(collections.USERS).findOne({
-          email: email?.replace?.("_login", ""),
+          phoneNumber: phoneNumber?.replace?.("_login", ""),
         });
 
         if (already) {
           let temp = await db.collection(collections.TEMP).findOne({
-            email,
+            phoneNumber,
             secret,
           });
 
@@ -319,12 +319,12 @@ export default {
       }
     });
   },
-  edit_profile: ({ email, number, ...details }, userId) => {
+  edit_profile: ({ phoneNumber, number, ...details }, userId) => {
     return new Promise(async (resolve, reject) => {
       try {
         await db
           .collection(collections.USERS)
-          .createIndex({ email: 1 }, { unique: true });
+          .createIndex({ phoneNumber: 1 }, { unique: true });
         await db
           .collection(collections.USERS)
           .createIndex({ number: 1 }, { unique: true });
@@ -394,7 +394,7 @@ export default {
       }
     });
   },
-  edit_request: (secret, userId, { email, number }) => {
+  edit_request: (secret, userId, { phoneNumber, number }) => {
     return new Promise(async (resolve, reject) => {
       let res;
 
@@ -403,8 +403,8 @@ export default {
           .collection(collections.TEMP)
           .createIndex({ expireAt: 1 }, { expireAfterSeconds: 3600 });
 
-        let email_already = await db.collection(collections.USERS).findOne({
-          email: email?.toLowerCase?.(),
+        let phoneNumber_already = await db.collection(collections.USERS).findOne({
+          phoneNumber: phoneNumber?.toLowerCase?.(),
           _id: {
             $ne: new ObjectId(userId),
           },
